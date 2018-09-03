@@ -25,7 +25,18 @@ void callback( const geometry_msgs::Twist& twist_msg)
 
   Vx = twist_msg.linear.x / 4;
   Vy = twist_msg.linear.y / 4;
-  Wz = twist_msg.angular.z / 4;
+  Wz = twist_msg.angular.z / 2;
+  
+  if ( twist_msg.angular.x == 1)
+     mode = 0;
+  else if ( twist_msg.angular.y == 1)
+     mode = 1;
+
+  if(mode){
+    Vx=Vx*1000;
+    Vy=Vy*1000;
+    Wz=Wz*150;
+  }
   
   /*if (twist_msg.linear.x > 0.5)
      digitalWrite(13, HIGH);
