@@ -15,7 +15,11 @@ def callback(data):
  twist = Twist()
  twist.linear.x = 1*data.axes[1]
  twist.linear.y = 1*data.axes[0]
- twist.angular.z = 1*data.axes[2]
+ twist.angular.z = -1*data.axes[3]
+
+ twist.angular.x = data.buttons[5]
+ twist.angular.y = data.buttons[4]
+
  pub.publish(twist)
 
 # Intializes everything
