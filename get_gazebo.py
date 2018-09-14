@@ -4,121 +4,88 @@ import math
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import Twist
 
-flag = False
-flag_phi = False
+flag_first = True  	# sets flag for first goal
+flag_rviz = True  	# sets the flag when rviz nav goal button clicked
 
-t_prev = 0
-t_vlad = 0
+x_vel = 0.1       # the velocity in  m/s
+y_vel = 0.1       # the velocity in  m/s
+psi_vel = 0.5      # the angular velocity r/s
 
-x_goal = 0.5
-y_goal = 0.2  # minus = right
-phi_goal = 0.0
-
-gx = 10
-gy = 10
-gpsi = -5
+gx = 10              # gain of X
+gy = 10              # gain of Y
+gpsi = 1             # gain of PSI
 
 
 def callback(data):
-	global flag, flag_phi
-	global t_prev, t_vlad
-	global x_goal, y_goal, phi_goal
-	global x0, y0, phi0
+	# variable are declared as global, so the programs will use the global variables and not to create local variables
+	global flag_first, flag_rviz
+	global t_now, t0
+	global x_goal, y_goal, psi_goal
+	global x_vel, y_vel, psi_vel
+	global x0, y0, psi0
 	global gx, gy, gpsi
 
 	pub = rospy.Publisher('/mallard/cmd_vel', Twist, queue_size=10)
 	twist = Twist()
+	psi_now = 2 * math.atan2(data.pose.orientation.z, data.pose.orientation.w)  # calculates current angle
 
-	if flag == True:
-		if x0 == 0:
-			x0 = data.pose.position.x
-		if y0 == 0:
-			y0 = data.pose.position.y
-		if phi0 == 0:
-			phi0 = 2 * math.atan2(data.pose.orientation.z, data.pose.orientation.w)
+# if it's the first run through then set the goal to current position
+	if flag_first:
+		x_goal = data.pose.position.x
+		y_goal = data.pose.position.y
+		psi_goal = psi_now
+		flag_first = False
 
-		t_nano = data.header.stamp.nsecs
-		if (t_nano > t_prev):
-			t_delta = t_nano - t_prev  # this isn't correct on the first call??
-		else:
-			t_delta = 1000000000 - t_prev + t_nano  # aprox 0.02 sec
-		if t_prev == 0:
-			t_delta = 20000000
-		t_prev = t_nano
-		t_vlad = t_vlad + (t_delta / 1000000000.0)
+# reset zeros and if there's been an input from rviz than use that as the goal
+	if flag_rviz:
+		x0 = data.pose.position.x
+		y0 = data.pose.position.y
+		psi0 = 2 * math.atan2(data.pose.orientation.z, data.pose.orientation.w)      # gets the offset value of PSI
+		t0 = data.header.stamp.secs + data.header.stamp.nsecs * 0.000000001          # gets the offset in time
+		flag_rviz = False
+	t_now = (data.header.stamp.secs + data.header.stamp.nsecs * 0.000000001) - t0   # adds the time since start
 
-		if abs(data.pose.position.x - x_goal) < 0.02:
-			twist.linear.x = -25
-		else:
-			x_des = x0 + abs(x_goal - x0) / (x_goal - x0) * t_vlad * 0.05
-			twist.linear.x = (x_des - data.pose.position.x) * gx
-			rospy.loginfo("x_des: %s, x_current: %s, x_twist: %s", x_des, data.pose.position.x, twist.linear.x)
+#  control in nav frame
+	xf_nav = contKG(x_goal, x0, x_vel, t_now, data.pose.position.x, gx)
+	yf_nav = contKG(y_goal, y0, y_vel, t_now, data.pose.position.y, gy)
+	psif_nav = contKG(psi_goal, psi0, psi_vel, t_now, psi_now, gpsi)
 
-		if abs(data.pose.position.y - y_goal) < 0.02:
-			twist.linear.y = -25
-		else:
-			y_des = y0 + abs(y_goal - y0) / (y_goal - y0) * t_vlad * 0.05
-			twist.linear.y = (y_des - data.pose.position.y) * gy
+# put forces into body frame
+	xf_body = + math.cos(psi_now)*xf_nav + math.sin(psi_now)*yf_nav
+	yf_body = - math.sin(psi_now)*xf_nav + math.cos(psi_now)*yf_nav
 
-		current_phi = 2 * math.atan2(data.pose.orientation.z, data.pose.orientation.w)
-		if abs(current_phi - phi_goal) < 0.02:
-			twist.angular.z = -25
-		else:
-			phi_des = phi0 + abs(phi_goal - phi0) / (phi_goal - phi0) * t_vlad * 0.2
-			if abs(phi_des - phi_goal) < 0.01:
-				flag_phi = True
-			if flag_phi:
-				twist.angular.z = (phi_goal - current_phi) * gpsi
-			else:
-				twist.angular.z = (phi_des - current_phi) * gpsi
+# put forces into twist structure
+	twist.linear.x = xf_body
+	twist.linear.y = yf_body
+	twist.angular.z = psif_nav
+	twist.angular.z = -twist.angular.z # fix to account for wrong direction on robot
+	pub.publish(twist)
 
-		#twist.linear.x = -25
-		#twist.linear.y = -25
-		#twist.angular.z = -25
-
-		if (twist.linear.x == -25) and (twist.linear.y == -25) and (twist.angular.z == -25):
-			flag = False
-		if twist.linear.x == -25:
-			twist.linear.x = 0
-		if twist.linear.y == -25:
-			twist.linear.y = 0
-		if twist.angular.z == -25:
-			twist.angular.z = 0
-		pub.publish(twist)
-
-	else:
-		twist.linear.x = 0
-		twist.linear.y = 0
-		twist.linear.z = 0
-		twist.angular.x = 0
-		twist.angular.y = 0
-		twist.angular.z = 0
-
-
-# pub.publish(twist)
 
 def callback2(data):
-	global flag
-	global t_prev, t_vlad
-	global x0, y0, phi0
-	flag = True
-	x0 = 0.0
-	y0 = 0.0
-	phi0 = 0.0
-	t_vlad = 0
-	t_prev = 0
+	global flag_rviz
+	global x_goal, y_goal, psi_goal
+	flag_rviz = True          # sets the flag when rviz nav goal button clicked
+	x_goal = data.pose.position.x  # X goal point
+	y_goal = data.pose.position.y  # Y goal point, negative value is right
+	psi_goal = 2 * math.atan2(data.pose.orientation.z, data.pose.orientation.w)  # calculates current angle
 
 
-def listener():
-	rospy.init_node('move_mallard', anonymous=True)
-	rospy.Subscriber("/slam_out_pose", PoseStamped, callback)
-	rospy.Subscriber("/move_base_simple/goal", PoseStamped, callback2)
-	rospy.spin()
+def contKG(goal, zero, vel, t_now, pos_now, gp):   # my controller function
+	t_goal = abs((goal - zero) / vel)
+	if t_now < t_goal:
+		des = zero + abs(goal - zero) / (goal - zero) * t_now * vel  # calculate desired X at t_vlad
+	else:
+		des = goal
+	err = des - pos_now
+	f_nav = err * gp
+	if abs(f_nav) > 1:
+		f_nav = f_nav / abs(f_nav)
+	return f_nav
 
 
 if __name__ == '__main__':
-	listener()
-
-
-
-
+	rospy.init_node('move_mallard', anonymous=True)                     # initialise node "move_mallard"
+	rospy.Subscriber("/slam_out_pose", PoseStamped, callback)           # subscribes to topic "/slam_out_pose"
+	rospy.Subscriber("/move_base_simple/goal", PoseStamped, callback2)  # subscribes to topic "/move_base_simple/goal"
+	rospy.spin()
